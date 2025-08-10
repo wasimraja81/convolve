@@ -38,4 +38,6 @@ docker run --rm ${IMAGE_NAME}:${COMPREHENSIVE_TAG} beamcon_3D --help || echo "be
 echo "Displaying build metadata..."
 docker run --rm ${IMAGE_NAME}:${COMPREHENSIVE_TAG} cat /opt/RACS-tools/BUILD_INFO.txt
 
-echo "Container test completed successfully!"
+echo ""
+echo "✅ Container test completed successfully!"
+exit 0

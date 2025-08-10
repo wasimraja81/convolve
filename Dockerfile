@@ -38,6 +38,10 @@ RUN pip3 install -e .
 # Verify binaries are installed and accessible (they should be in /usr/local/bin after pip install)
 RUN which beamcon_2D && which beamcon_3D
 
+# Build-time validation: ensure binaries actually work before push
+RUN beamcon_2D --help > /dev/null 2>&1 && beamcon_3D --help > /dev/null 2>&1 || \
+    (echo "ERROR: RACS-tools binaries failed validation!" && exit 1)
+
 # Create metadata file with build information
 RUN echo "RACS-tools Build Information" > /opt/RACS-tools/BUILD_INFO.txt && \
     echo "Git SHA: ${RACS_GIT_SHA}" >> /opt/RACS-tools/BUILD_INFO.txt && \
@@ -51,6 +55,10 @@ WORKDIR /workspace
 # Set environment variables
 ENV PYTHONPATH="/opt/RACS-tools:${PYTHONPATH}"
 ENV PATH="/opt/RACS-tools:${PATH}"
+
+# Runtime health check for container monitoring (optional)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD beamcon_2D --help > /dev/null && beamcon_3D --help > /dev/null || exit 1
 
 # Default command
 CMD ["/bin/bash"]
