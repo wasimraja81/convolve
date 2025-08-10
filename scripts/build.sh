@@ -15,11 +15,24 @@ TEST_PLATFORM="linux/arm64"  # Native platform for your Mac
 CHECK_BUILD_MODE=false
 CLEANUP_AFTER_BUILD=false
 AGGRESSIVE_CLEANUP=false
+SINGLE_ARCH_MODE=false
+SINGLE_ARCH_PLATFORM=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
         --check-build)
             CHECK_BUILD_MODE=true
+            shift
+            ;;
+        --single-arch)
+            SINGLE_ARCH_MODE=true
+            # Check if next argument is a platform
+            if [[ $# -gt 1 && $2 =~ ^linux/(amd64|arm64)$ ]]; then
+                SINGLE_ARCH_PLATFORM="$2"
+                shift
+            else
+                SINGLE_ARCH_PLATFORM="${TEST_PLATFORM}"
+            fi
             shift
             ;;
         --cleanup)
@@ -34,26 +47,22 @@ while [[ $# -gt 0 ]]; do
         --help|-h)
             echo "Usage: $0 [OPTIONS]"
             echo ""
-            echo "Options:"
-            echo "  --check-build        Build single-platform for testing only (local load, no push)"
-            echo "  --cleanup            Remove Docker artifacts from this build (conservative)"
-            echo "  --cleanup-aggressive Remove ALL unused Docker artifacts (affects other projects)"
-            echo "  --help, -h           Show this help message"
+            echo "Build Modes:"
+            echo "  (no options)                 Multi-arch production build with retry logic"
+            echo "  --check-build                Single-platform development build with testing (local only)"
+            echo "  --single-arch [PLATFORM]     Single-platform production build and push"
+            echo "                               PLATFORM: linux/amd64 or linux/arm64 (default: native)"
             echo ""
-            echo "Modes:"
-            echo "  Default       Build multi-arch and push to registry (production mode, no cache)"
-            echo "  --check-build Build single-platform, test locally, no push (development mode)"
+            echo "Cleanup Options:"
+            echo "  --cleanup                    Remove Docker artifacts from this build only"
+            echo "  --cleanup-aggressive         Remove ALL unused Docker artifacts (affects other projects)"
             echo ""
             echo "Examples:"
-            echo "  $0                           # Production: Build multi-arch, no cache, and push"
-            echo "  $0 --check-build            # Development: Build, test, load locally"
-            echo "  $0 --check-build --cleanup  # Development: Build, test, safe cleanup"
-            echo "  $0 --cleanup-aggressive     # Production: Build, push, aggressive cleanup"
-            echo ""
-            echo "Cleanup modes:"
-            echo "  --cleanup            Safe: Only removes artifacts from this specific build"
-            echo "  --cleanup-aggressive Aggressive: Removes ALL unused Docker artifacts system-wide"
-            echo "                       (may affect other projects - use in CI/CD environments)"
+            echo "  $0                           # Multi-arch build with 3 retry attempts"
+            echo "  $0 --single-arch             # Build for native platform (ARM64) only"
+            echo "  $0 --single-arch linux/amd64 # Build for AMD64 only (cross-compile)"
+            echo "  $0 --check-build             # Development: build, test locally, no push"
+            echo "  $0 --cleanup-aggressive      # Production build + aggressive cleanup"
             exit 0
             ;;
         *)
@@ -99,7 +108,34 @@ clone_and_capture_metadata() {
     cd ../..
 }
 
-# Function to build Docker image for check mode
+# Function to build single-arch image and push
+build_single_arch_image() {
+    local platform=$1
+    echo ""
+    echo "🔍 SINGLE-ARCH BUILD: Building for ${platform}"
+    echo "Image: ${IMAGE_NAME}:${COMPREHENSIVE_TAG}"
+    
+    docker buildx build \
+        --platform ${platform} \
+        --no-cache \
+        --build-arg RACS_GIT_SHA="${RACS_GIT_SHA}" \
+        --build-arg RACS_GIT_TAG="${RACS_GIT_TAG}" \
+        --build-arg RACS_GIT_DESCRIBE="${RACS_GIT_DESCRIBE}" \
+        --build-arg RACS_BUILD_DATE="${RACS_BUILD_DATE}" \
+        --push \
+        -t ${IMAGE_NAME}:${COMPREHENSIVE_TAG} .
+
+    if [ $? -eq 0 ]; then
+        echo ""
+        echo "✅ Single-arch build completed and pushed: ${IMAGE_NAME}:${COMPREHENSIVE_TAG}"
+        echo "   Platform: ${platform}"
+        return 0
+    else
+        echo ""
+        echo "❌ Single-arch build failed!"
+        return 1
+    fi
+}
 build_check_image() {
     echo ""
     echo "🔍 CHECK BUILD MODE: Building single-platform for testing"
@@ -127,27 +163,42 @@ build_production_image() {
     echo "Image: ${IMAGE_NAME}:${COMPREHENSIVE_TAG}"
     echo "Cache: Disabled for clean production build"
     
-    # Build multi-arch with no cache, health check and push
-    docker buildx build \
-        --platform ${BUILD_PLATFORMS} \
-        --no-cache \
-        --build-arg RACS_GIT_SHA="${RACS_GIT_SHA}" \
-        --build-arg RACS_GIT_TAG="${RACS_GIT_TAG}" \
-        --build-arg RACS_GIT_DESCRIBE="${RACS_GIT_DESCRIBE}" \
-        --build-arg RACS_BUILD_DATE="${RACS_BUILD_DATE}" \
-        --push \
-        -t ${IMAGE_NAME}:${COMPREHENSIVE_TAG} .
-
-    if [ $? -eq 0 ]; then
-        echo ""
-        echo "🚀 Successfully built and pushed multi-arch image: ${IMAGE_NAME}:${COMPREHENSIVE_TAG}"
-        echo "   Available platforms: ${BUILD_PLATFORMS}"
-        return 0
-    else
-        echo ""
-        echo "❌ Production build/push failed!"
-        return 1
-    fi
+    # Retry logic for multi-arch build (handles transient ARM64 pull failures)
+    local max_attempts=3
+    local attempt=1
+    
+    while [ $attempt -le $max_attempts ]; do
+        echo "Build attempt $attempt of $max_attempts..."
+        
+        docker buildx build \
+            --platform ${BUILD_PLATFORMS} \
+            --no-cache \
+            --build-arg RACS_GIT_SHA="${RACS_GIT_SHA}" \
+            --build-arg RACS_GIT_TAG="${RACS_GIT_TAG}" \
+            --build-arg RACS_GIT_DESCRIBE="${RACS_GIT_DESCRIBE}" \
+            --build-arg RACS_BUILD_DATE="${RACS_BUILD_DATE}" \
+            --push \
+            -t ${IMAGE_NAME}:${COMPREHENSIVE_TAG} .
+        
+        if [ $? -eq 0 ]; then
+            echo ""
+            echo "🚀 Successfully built and pushed multi-arch image: ${IMAGE_NAME}:${COMPREHENSIVE_TAG}"
+            echo "   Available platforms: ${BUILD_PLATFORMS}"
+            echo "   Completed on attempt $attempt"
+            return 0
+        else
+            echo "❌ Build attempt $attempt failed"
+            if [ $attempt -lt $max_attempts ]; then
+                echo "⏳ Waiting 30 seconds before retry..."
+                sleep 30
+            fi
+            attempt=$((attempt + 1))
+        fi
+    done
+    
+    echo ""
+    echo "❌ Production build/push failed after $max_attempts attempts!"
+    return 1
 }
 
 # Function to run tests (only in check mode)
@@ -258,6 +309,29 @@ main() {
         echo ""
         echo "Ready for production build:"
         echo "  $0"
+        
+    elif [ "$SINGLE_ARCH_MODE" = true ]; then
+        # Single-arch production mode: build specified platform and push
+        echo "=============================================="
+        echo "🏗️  SINGLE-ARCH MODE: Single platform build and push"
+        echo "=============================================="
+        echo "Platform: ${SINGLE_ARCH_PLATFORM}"
+        echo "Note: Building single platform as fallback to multi-arch"
+        
+        if ! build_single_arch_image "${SINGLE_ARCH_PLATFORM}"; then
+            echo ""
+            echo "❌ Single-arch build failed!"
+            # Clean up on failure
+            echo "Cleaning up temporary files..."
+            rm -rf tmp/RACS-tools
+            exit 1
+        fi
+        
+        echo ""
+        echo "🎉 Single-arch build successful!"
+        echo "   ✅ Single platform image built and pushed"
+        echo "   🌐 Available on registry: ${IMAGE_NAME}:${COMPREHENSIVE_TAG}"
+        echo "   📋 Platform: ${SINGLE_ARCH_PLATFORM}"
         
     else
         # Production mode: build multi-arch and push directly
