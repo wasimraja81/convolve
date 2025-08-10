@@ -1,149 +1,179 @@
 # Convolve Container
 
-This repository contains the Docker setup for building a container with RACS-tools installed on top of a base casacore image.
+Multi-architecture Docker container for RACS-tools with comprehensive build pipeline and testing system.
 
 ## Overview
 
 - **Base Image**: `wasimraja81/base-casacore:casacore-3.7.1-20250810-607f488`
-- **Target Registry**: `wasimraja81/askappy-ubuntu-24.04:convolve-<tag>`
+- **Target Registry**: `wasimraja81/askappy-ubuntu-24.04:convolve-<comprehensive-tag>`
+- **Platforms**: `linux/amd64`, `linux/arm64`
 - **Source Code**: [RACS-tools](https://github.com/AlecThomson/RACS-tools.git) (cloned during build)
 
 ## Key Features
 
-- **Fresh RACS-tools**: Always builds from the latest master branch
-- **Metadata Preservation**: Captures git SHA, tags, and build date
-- **Binary Access**: `beamcon_2D` and `beamcon_3D` available in `/usr/local/bin`
-- **Build Reproducibility**: Git metadata embedded in container labels and build info
-- **Smart Tagging**: Uses actual RACS-tools git tags for container versions
+- **Multi-Architecture**: Builds for both AMD64 and ARM64 platforms
+- **Two Build Modes**: Development (fast) and Production (clean, no-cache)
+- **Fresh RACS-tools**: Always builds from the latest source
+- **Build-time Validation**: Binary verification during container build
+- **Comprehensive Testing**: Automated test suite with health checks
+- **Safe Cleanup Options**: Conservative and aggressive Docker cleanup modes
+- **Smart Tagging**: `convolve-{git-tag}-{git-sha}-{build-date}` format
 
-## Quick Start
+## Build System
 
-### Building the Container
+### Quick Start
 
 ```bash
-# Build with automatic timestamp tag
+# Development: Fast build, local testing
+./scripts/build.sh --check-build
+
+# Production: Clean build, multi-arch, push to registry  
 ./scripts/build.sh
 
-# Build with custom tag  
-./scripts/build.sh v1.0.0
+# With cleanup options
+./scripts/build.sh --cleanup                    # Safe cleanup
+./scripts/build.sh --cleanup-aggressive         # Full cleanup
 ```
 
-The build process will:
-1. Clone the latest RACS-tools from GitHub
-2. Capture git metadata (SHA, tags, build date)
-3. Build the container with embedded metadata
-4. Tag with both build timestamp and RACS-tools git tag (e.g., `convolve-v4.3.0`)
-5. Clean up temporary files
+### Build Modes
 
-### Testing the Container
+| Mode | Cache | Platforms | Push | Use Case |
+|------|-------|-----------|------|----------|
+| **Development** (`--check-build`) | ✅ Yes | Single (native) | ❌ No | Fast iteration, local testing |
+| **Production** (default) | ❌ No | Multi-arch | ✅ Yes | Deployment, reproducible builds |
+
+### Individual Scripts
+
+All scripts support comprehensive tagging and can be used standalone:
 
 ```bash
-# Test with a specific version
-./scripts/test.sh v1.0.0
-
-# Test the most recent git tag version (auto-detected)
-./scripts/test.sh
+./scripts/test.sh <tag>     # Run comprehensive tests
+./scripts/push.sh <tag>     # Push multi-arch image  
+./scripts/run.sh <tag>      # Interactive container
+./scripts/info.sh <tag>     # Display build metadata
 ```
+## Build Process
 
-Tests include:
-- Python and RACS-tools import verification
-- Binary availability (`beamcon_2D`, `beamcon_3D`)
-- Build metadata display
+The build system automatically:
 
-### Pushing to Registry
+1. **Clones RACS-tools** from GitHub master branch
+2. **Captures Git Metadata** (SHA, tags, build date)  
+3. **Builds Container** with embedded metadata and validation
+4. **Runs Tests** (development mode only)
+5. **Pushes Multi-arch** (production mode only)
+6. **Cleans Up** (if requested)
 
-```bash
-# Push latest built image
-./scripts/push.sh
+### Example Tags
 
-# Push specific version
-./scripts/push.sh v1.0.0
-```
-
-### Running Interactively
-
-```bash
-# Run with latest image
-./scripts/run.sh
-
-# Run with specific version
-./scripts/run.sh v1.0.0
-```
+- `convolve-v4.3.0-a1b2c3d-20250811` (with git tag)
+- `convolve-a1b2c3d-20250811` (no git tag)
 
 ## Container Details
 
-The container includes:
-
-- **Base**: casacore 3.7.1 pre-installed
-- **RACS-tools**: Installed from source at `/opt/RACS-tools`
-- **Python Environment**: Python 3 with all RACS-tools dependencies
-- **Working Directory**: `/workspace` (mounted from host when using `run.sh`)
+### Base Environment
+- **Base**: casacore 3.7.1 with Ubuntu 24.04
+- **RACS-tools**: Installed from source with binary validation
+- **Python Environment**: Python 3 with full dependency stack
+- **Health Check**: Automated binary validation
 
 ### Available Tools
+- **Python modules**: `import racs_tools` 
+- **Binaries**: `beamcon_2D`, `beamcon_3D` in `/usr/local/bin`
+- **Source code**: Available at `/opt/RACS-tools`
 
-RACS-tools provides various radio astronomy utilities. After starting the container, you can access:
+### Runtime Features
+- **Working Directory**: `/workspace` (auto-mounted when using `run.sh`)
+- **Volume Support**: Automatic host directory mounting
+- **Multi-arch**: Runs natively on both AMD64 and ARM64
 
-- Python modules: `import racs_tools`
-- Command-line tools: Available in `/opt/RACS-tools/bin/`
+## Advanced Usage
+
+### Cleanup Options
+
+```bash
+# Safe cleanup (recommended) - only affects current project
+./scripts/build.sh --check-build --cleanup
+
+# Aggressive cleanup (CI/CD) - affects all Docker artifacts  
+./scripts/build.sh --cleanup-aggressive
+```
+
+### Manual Operations
+
+```bash
+# View build help
+./scripts/build.sh --help
+
+# Get container metadata
+./scripts/info.sh <tag>
+
+# Run specific tests only
+docker run --rm wasimraja81/askappy-ubuntu-24.04:<tag> python -c "import racs_tools; print('OK')"
+```
 
 ## File Structure
 
 ```
 .
-├── Dockerfile              # Main container definition
-├── README.md               # This file
-├── scripts/
-│   ├── build.sh            # Build the container
-│   ├── push.sh             # Push to registry  
-│   ├── test.sh             # Test container functionality
-│   ├── run.sh              # Run container interactively
-│   └── info.sh             # Show build metadata
-├── tmp/                    # Temporary build directory (auto-cleaned)
-└── .gitignore              # Git ignore file
+├── Dockerfile                    # Multi-arch container definition
+├── README.md                     # Documentation
+├── .gitignore                    # Excludes tmp/ build artifacts
+└── scripts/
+    ├── build.sh                  # Main build orchestrator (two modes)
+    ├── test.sh                   # Comprehensive test suite
+    ├── push.sh                   # Multi-arch registry push
+    ├── run.sh                    # Interactive container runner  
+    └── info.sh                   # Build metadata display
 ```
 
-## Usage Examples
+## Development Workflow
 
-### Building and Deploying
+### Typical Development Cycle
 
-1. **Build the container**:
-   ```bash
-   ./scripts/build.sh v1.0.0
-   ```
+1. **Develop/Test**: `./scripts/build.sh --check-build`
+2. **Iterate**: Make changes, repeat step 1
+3. **Deploy**: `./scripts/build.sh` (production build)
+4. **Cleanup**: Add `--cleanup` flag as needed
 
-2. **Test it works**:
-   ```bash
-   ./scripts/test.sh v1.0.0
-   ```
+### CI/CD Integration
 
-3. **Push to registry**:
-   ```bash
-   ./scripts/push.sh v1.0.0
-   ```
+```yaml
+# Example GitHub Actions usage
+- name: Build and Push
+  run: |
+    ./scripts/build.sh --cleanup-aggressive
+```
 
-### Development Workflow
+## Troubleshooting
 
-1. **Start interactive session**:
-   ```bash
-   ./scripts/run.sh
-   ```
+### Build Issues
+- Check Docker buildx is installed: `docker buildx version`
+- Verify registry access: `docker login`
+- For cache issues: Use `--no-cache` (already enabled in production)
 
-2. **Test RACS-tools functionality**:
-   ```bash
-   python3 -c "import racs_tools; print('RACS-tools loaded successfully')"
-   ```
+### Test Failures  
+- Binary validation fails: Check RACS-tools source integrity
+- Import errors: Verify Python environment in container
+- Platform issues: Test single-arch first with `--check-build`
+
+### Cleanup Problems
+- Use conservative cleanup by default: `--cleanup`
+- Only use aggressive cleanup in isolated CI environments
+- Check disk space: `docker system df`
+
+---
 
 ## Registry Information
 
-Images will be pushed to:
-- `wasimraja81/askappy-ubuntu-24.04:convolve-<your-version>` (e.g., `convolve-v1.0.0`)
-- `wasimraja81/askappy-ubuntu-24.04:convolve-<racs-git-tag>` (e.g., `convolve-v4.3.0`)
+Images are pushed to:
+- `wasimraja81/askappy-ubuntu-24.04:convolve-v4.3.0-a1b2c3d-20250811`
+- Multi-architecture support: `linux/amd64`, `linux/arm64`
+- Automatic platform detection for optimal performance
 
 ## Notes
 
-- **Base Image**: Built on `wasimraja81/base-casacore:casacore-3.7.1-20250810-607f488`
-- Make sure Docker is installed and you're logged into your Docker Hub registry
-- The scripts automatically handle tagging with both your version and the RACS-tools git tag
-- All scripts include error handling (`set -e`) to stop on any failures
-- Git metadata is preserved in container labels and `/opt/RACS-tools/BUILD_INFO.txt`
-- Binaries `beamcon_2D` and `beamcon_3D` are available in `/usr/local/bin`
+- **Clean Production Builds**: No cache used in production mode for reproducibility
+- **Git Integration**: Metadata preserved in container labels and `/opt/RACS-tools/BUILD_INFO.txt`  
+- **Binary Access**: `beamcon_2D` and `beamcon_3D` available in `/usr/local/bin`
+- **Error Handling**: All scripts use `set -e` for fail-fast behavior
+- **Authentication**: Ensure `docker login` for registry access
