@@ -52,10 +52,6 @@ RUN echo "RACS-tools Build Information" > /opt/RACS-tools/BUILD_INFO.txt && \
 # Create a working directory for user data
 WORKDIR /workspace
 
-# Set environment variables
-ENV PYTHONPATH="/opt/RACS-tools:${PYTHONPATH}"
-ENV PATH="/opt/RACS-tools:${PATH}"
-
 # Runtime health check for container monitoring (optional)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD beamcon_2D --help > /dev/null && beamcon_3D --help > /dev/null || exit 1
