@@ -200,9 +200,9 @@ cleanup_docker_artifacts() {
         echo "Removing built image: ${IMAGE_NAME}:${COMPREHENSIVE_TAG}"
         docker rmi "${IMAGE_NAME}:${COMPREHENSIVE_TAG}" 2>/dev/null || echo "  (Image not found locally - likely pushed only)"
         
-        # Clean up buildx cache for this specific builder only
-        echo "Cleaning buildx cache for this builder..."
-        docker buildx prune --builder elated_lichterman --force 2>/dev/null || echo "  (Using default builder - skipping specific cleanup)"
+        # Clean up buildx cache for current builder
+        echo "Cleaning buildx cache for current builder..."
+        docker buildx prune --force 2>/dev/null || echo "  (Cache cleanup skipped)"
         
         # More conservative cleanup - only remove dangling images with our label/name pattern
         echo "Removing dangling images related to this build..."
