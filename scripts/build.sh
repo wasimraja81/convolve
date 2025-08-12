@@ -8,6 +8,7 @@ IMAGE_NAME="wasimraja81/askappy-ubuntu-24.04"
 CONTAINER_NAME="convolve"
 BASE_TAG="convolve"
 RACS_TOOLS_REPO="https://github.com/AlecThomson/RACS-tools.git"
+RACS_TOOLS_TAG="v4.0.3"  # Specific tag to build from
 BUILD_PLATFORMS="linux/amd64,linux/arm64"
 TEST_PLATFORM="linux/arm64"  # Native platform for your Mac
 
@@ -17,11 +18,22 @@ CLEANUP_AFTER_BUILD=false
 AGGRESSIVE_CLEANUP=false
 SINGLE_ARCH_MODE=false
 SINGLE_ARCH_PLATFORM=""
+CUSTOM_TAG=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
         --check-build)
             CHECK_BUILD_MODE=true
+            shift
+            ;;
+        --tag)
+            if [[ $# -gt 1 ]]; then
+                CUSTOM_TAG="$2"
+                shift
+            else
+                echo "Error: --tag requires a tag name"
+                exit 1
+            fi
             shift
             ;;
         --single-arch)
@@ -53,16 +65,20 @@ while [[ $# -gt 0 ]]; do
             echo "  --single-arch [PLATFORM]     Single-platform production build and push"
             echo "                               PLATFORM: linux/amd64 or linux/arm64 (default: native)"
             echo ""
+            echo "RACS-tools Options:"
+            echo "  --tag TAG                    Build from specific RACS-tools Git tag (default: ${RACS_TOOLS_TAG})"
+            echo ""
             echo "Cleanup Options:"
             echo "  --cleanup                    Remove Docker artifacts from this build only"
             echo "  --cleanup-aggressive         Remove ALL unused Docker artifacts (affects other projects)"
             echo ""
             echo "Examples:"
-            echo "  $0                           # Multi-arch build with 3 retry attempts"
+            echo "  $0                           # Multi-arch build from ${RACS_TOOLS_TAG}"
+            echo "  $0 --tag v4.1.0             # Build from specific RACS-tools tag v4.1.0"
             echo "  $0 --single-arch             # Build for native platform (ARM64) only"
             echo "  $0 --single-arch linux/amd64 # Build for AMD64 only (cross-compile)"
             echo "  $0 --check-build             # Development: build, test locally, no push"
-            echo "  $0 --cleanup-aggressive      # Production build + aggressive cleanup"
+            echo "  $0 --tag v4.0.3 --cleanup-aggressive  # Build v4.0.3 + aggressive cleanup"
             exit 0
             ;;
         *)
@@ -78,11 +94,26 @@ clone_and_capture_metadata() {
     echo "Cleaning up any existing temporary clone..."
     rm -rf tmp/RACS-tools
 
+    # Determine which tag to use
+    local target_tag="${CUSTOM_TAG:-${RACS_TOOLS_TAG}}"
+    
     echo "Cloning RACS-tools repository..."
+    echo "Target tag: ${target_tag}"
     mkdir -p tmp
     cd tmp
     git clone ${RACS_TOOLS_REPO}
     cd RACS-tools
+    
+    # Checkout the specific tag
+    echo "Checking out tag: ${target_tag}"
+    git checkout ${target_tag}
+    if [ $? -ne 0 ]; then
+        echo "❌ Error: Failed to checkout tag '${target_tag}'"
+        echo "   Please verify the tag exists at: ${RACS_TOOLS_REPO}/tags"
+        cd ../..
+        rm -rf tmp/RACS-tools
+        exit 1
+    fi
 
     # Capture git metadata
     RACS_GIT_SHA=$(git rev-parse HEAD)
@@ -91,11 +122,11 @@ clone_and_capture_metadata() {
     RACS_GIT_DESCRIBE=$(git describe --tags --always --dirty 2>/dev/null || git rev-parse HEAD)
     RACS_BUILD_DATE=$(date -u +%Y%m%d)
 
-    # Create comprehensive tag
+    # Create comprehensive tag with RACS-tools version
     if [ "${RACS_GIT_TAG}" != "no-tag" ]; then
         COMPREHENSIVE_TAG="convolve-${RACS_GIT_TAG}-${RACS_GIT_SHA_SHORT}-${RACS_BUILD_DATE}"
     else
-        COMPREHENSIVE_TAG="convolve-${RACS_GIT_SHA_SHORT}-${RACS_BUILD_DATE}"
+        COMPREHENSIVE_TAG="convolve-${target_tag}-${RACS_GIT_SHA_SHORT}-${RACS_BUILD_DATE}"
     fi
 
     echo "RACS-tools metadata:"
@@ -103,6 +134,7 @@ clone_and_capture_metadata() {
     echo "  Git Tag: ${RACS_GIT_TAG}"
     echo "  Git Describe: ${RACS_GIT_DESCRIBE}"
     echo "  Build Date: ${RACS_BUILD_DATE}"
+    echo "  Target Tag: ${target_tag}"
     echo "  Comprehensive Tag: ${COMPREHENSIVE_TAG}"
 
     cd ../..
@@ -276,6 +308,17 @@ cleanup_docker_artifacts() {
 
 # Main execution flow
 main() {
+    # Show build configuration
+    local target_tag="${CUSTOM_TAG:-${RACS_TOOLS_TAG}}"
+    echo "=============================================="
+    echo "🔧 BUILD CONFIGURATION"
+    echo "=============================================="
+    echo "RACS-tools Repository: ${RACS_TOOLS_REPO}"
+    echo "RACS-tools Target Tag: ${target_tag}"
+    echo "Docker Image Base: ${IMAGE_NAME}"
+    echo "Build Date: $(date -u +%Y-%m-%d)"
+    echo ""
+    
     clone_and_capture_metadata
     
     if [ "$CHECK_BUILD_MODE" = true ]; then
@@ -300,7 +343,9 @@ main() {
         echo ""
         echo "🎉 Check build successful!"
         echo "   ✅ Single-platform build completed"
-        echo "   ✅ All tests passed"
+        echo "   ✅ All tests passed" 
+        echo "   📦 RACS-tools version: ${RACS_GIT_TAG}"
+        echo "   📦 Built from SHA: ${RACS_GIT_SHA_SHORT}"
         if [ "$CLEANUP_AFTER_BUILD" = true ]; then
             echo "   🧹 Docker cleanup will be performed"
         else
@@ -332,6 +377,7 @@ main() {
         echo "   ✅ Single platform image built and pushed"
         echo "   🌐 Available on registry: ${IMAGE_NAME}:${COMPREHENSIVE_TAG}"
         echo "   📋 Platform: ${SINGLE_ARCH_PLATFORM}"
+        echo "   📦 RACS-tools version: ${RACS_GIT_TAG} (SHA: ${RACS_GIT_SHA_SHORT})"
         
     else
         # Production mode: build multi-arch and push directly
@@ -353,6 +399,7 @@ main() {
         echo "   ✅ Multi-arch image built and pushed"
         echo "   🌐 Available on registry: ${IMAGE_NAME}:${COMPREHENSIVE_TAG}"
         echo "   📋 Platforms: ${BUILD_PLATFORMS}"
+        echo "   📦 RACS-tools version: ${RACS_GIT_TAG} (SHA: ${RACS_GIT_SHA_SHORT})"
         if [ "$CLEANUP_AFTER_BUILD" = true ]; then
             echo "   🧹 Docker cleanup will be performed"
         fi
